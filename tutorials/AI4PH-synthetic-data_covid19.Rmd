@@ -1,0 +1,359 @@
+---
+title: "AI4PH - COVID-19 Risk Calculator"
+output: html_document
+---
+
+# Tutorial: COVID-19 Risk Calculator
+
+**This tutorial shows how to generate and evaluate synthetic data.** There are different approaches to synthetic data generation (SDG). 
+
+One is to begin with a highly curated dataset — where you've already selected the relevant variables and applied all preprocessing. This means you have already done the analysis on the real data and synthetic data is generated primarily for reproducibility. There is no need to share the full dataset.
+
+A different scenario is one where you share data with researchers who require access to the full dataset to inform their statistical analysis, or with students who are learning to work with raw data. This approach offers more flexibility and is the focus of this tutorial.
+
+```{r}
+path_wd <- knitr::current_input()
+
+if (is.null(path_wd) && rstudioapi::isAvailable()) {
+  path_wd <- rstudioapi::getActiveDocumentContext()$path
+  path_wd <- paste0(dirname(normalizePath(path_wd)), "/")
+}
+```
+
+## The Raw Dataset
+Before generating synthetic data, we need to set aside a holdout dataset for evaluation. We look at the raw dataset in the following and split it to a training and holdout dataset.
+
+### Load Your Dataset
+Let's load it as usual and have a look at it. 
+
+```{r}
+data_covid19 <- read.csv(paste0(path_wd, "data_covid19.csv"))
+```
+
+```{r}
+head(data_covid19,5)
+```
+
+When inspecting the data, we notice inconsistencies: missing values are represented as NA, "unknown" or specific numbers, and some variables have incorrect datatypes. We can clean this in R, but data loading functions in R may interfere with this effort and re-assign datatypes.
+
+An alternative is to use `pysdg`, which allows loading data in line with a pre-defined JSON file, ensuring consistent datatypes and handling of missing values across the data. This becomes in particular relevant when conducting synthetic data evaluations.
+
+### Check Out the JSON File
+In this case, a JSON file is stored alongside the dataset. We can have a look at it.
+
+```{r}
+data_covid19_info <- jsonlite::fromJSON(paste0(path_wd, "data_covid19.json"))
+```
+
+```{r}
+cat_idxs <- data_covid19_info$cat_idxs
+print(cat_idxs)
+```
+
+These are the variables indices of those variables that are categorical variables. As `pysdg` is a Python package, indexing starts at 0. In R, indexing starts at 1, so we need to adjust to retrieve the columnnames.
+
+```{r}
+cat_idxs_R <- cat_idxs + 1
+cat("Categorical variables: ", paste(colnames(data_covid19)[cat_idxs_R], collapse = ", "))
+```
+
+The JSON file also declares values that should be turned to NA. Let's have a look
+
+```{r}
+cat("Missing information: ", paste(data_covid19_info$miss_vals, collapse = ", "))
+```
+
+Note that the JSON file is not mandatory for `pysdg` but gives you control over some data cleaning steps. 
+
+### Split Your Dataset
+We want to preserve a holdout dataset that is not used during SDG. Such a holdout dataset is useful for privacy but also utility evaluation. 
+
+```{r}
+set.seed(1)
+train_idxs <- sample(nrow(data_covid19), size = 0.7 * nrow(data_covid19))
+train_covid19 <- data_covid19[train_idxs, ]
+holdout_covid19 <- data_covid19[-train_idxs, ]
+```
+
+```{r}
+write.csv(train_covid19, paste0(path_wd, "train_covid19.csv"), row.names = F)
+write.csv(holdout_covid19, paste0(path_wd, "holdout_covid19.csv"), row.names = F)
+```
+
+## Synthetic Data Generation
+We use an R interface to the python package `pysdg` for synthetic data generation (SDG). The package provides a unified interface to multiple SDG models does any model-specific pre-processing for you. 
+
+### Import Functions From `pysdg`
+We import the following functions from the Python package: 
+
+* synth.load for standardized loading of datasets
+* synth.generate to generate a synthetic dataset
+
+```{r message=FALSE, warning=FALSE}
+pysdg.gen <- reticulate::import("pysdg.gen")
+```
+
+### Create a Generator Object
+You can choose between different generators. We use Bayesian Networks (BN) and the Adversarial Random Forests (ARF) as examples. Check out the most recent documentation: we extend the selection of generators regularly. 
+
+You can also specify the number of cores that should be used, the working directory to store temporary files and whether or not you want to save the model. Check out the API documentation by `pysdg`.
+
+```{r}
+gen_bn <- pysdg.gen$Generator("synthcity/bayesian_network", num_cores = as.integer(4))
+gen_arf <- pysdg.gen$Generator("synthcity/arf", num_cores = as.integer(4))
+```
+
+### Load and Train the Generator Object 
+We define the paths to the data and the JSON file. Note that a JSON file is not required but can ensure data handling in line with your specifications.
+```{r}
+data_path <- paste0(path_wd, "train_covid19.csv")
+info_path <- paste0(path_wd, "data_covid19.json")
+```
+
+We train the BN generator object.
+```{r message=FALSE, warning=FALSE}
+invisible(gen_bn$load(data_path, info_path))
+gen_bn$train()
+```
+
+And the ARF generator object.
+```{r message=FALSE, warning=FALSE}
+invisible(gen_arf$load(data_path, info_path))
+gen_arf$train()
+```
+
+### Generate the Synthetic Data
+Once the SDG model is trained, you can generate as many datasets as you want and of any size you want. Typically, we use 10 synthetic datasets (num_synths) for evaluation to account for the stochasticity of the process. In our tutorial, we generate 2 synthetic datasets for illustration purposes. The number of rows (num_rows) typically matches the number of rows in the training data.
+
+You can also specify a path if you want to use a model that has been trained and stored previously. Check out the API documentation fo `pysdg`.
+
+```{r message=FALSE, warning=FALSE}
+gen_bn$gen(num_rows=nrow(gen_bn$enc_real), num_synths = as.integer(2)) 
+```
+
+```{r message=FALSE, warning=FALSE}
+gen_arf$gen(num_rows=nrow(gen_arf$enc_real), num_synths = as.integer(2)) 
+```
+
+### Retrieve the Synthetic Datasets
+The generated data is stored within the generator object. We can extract (i.e., unload) them as a list and can index each dataset individually. 
+
+```{r}
+synths_bn <- gen_bn$unload()
+synth_bn <- synths_bn[[1]]
+dim(synth_bn)
+```
+
+We can retrieve the ARF generated datasets the same way.
+```{r}
+synths_arf <- gen_arf$unload()
+synth_arf <- synths_arf[[1]]
+dim(synth_arf)
+```
+
+## Evaluation of Synthetic Data
+We load all datasets via `pysdg` to ensure that all datatypes and missing information are treated in the same way. 
+
+For evaluation, we need
+
+* the training dataset
+* the holdout dataset
+* the synthetic dataset(s)
+
+We can use any of the generators to load the datasets. It serves as a "mock" generator.
+```{r}
+holdout_path <- paste0(path_wd, "holdout_covid19.csv")
+```
+
+```{r message=FALSE, warning=FALSE}
+gen <- pysdg.gen$Generator("synthcity/bayesian_network")
+train <- gen$load(data_path, info_path)
+holdout <- gen$load(holdout_path, info_path)
+```
+
+### Exploring the Data
+In the following, we try some exemplary descriptive statistics to better understand the datasets.
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+train$data <- "train"
+synth_bn$data <- "synth_bn"
+synth_arf$data <- "synth_arf"
+combined <- rbind(train, synth_bn, synth_arf)
+train$data <- NULL
+```
+
+We can, for example, look at the age and sex distribution.
+
+```{r}
+females_only <- combined %>%
+  filter(sex == "female")
+
+table(females_only$age, females_only$data)
+```
+
+We can also look at the calculated COVID-19 infection risk. 
+```{r}
+combined %>%
+  group_by(data) %>%
+  summarise(
+    count = n(),
+    mean = mean(risk_infection, na.rm = TRUE),
+    median = median(risk_infection, na.rm = TRUE),
+    sd = sd(risk_infection, na.rm = TRUE),
+    min = min(risk_infection, na.rm = TRUE),
+    max = max(risk_infection, na.rm = TRUE)
+  )
+```
+
+```{r}
+ggplot(combined, aes(x = risk_infection, color = data)) +
+  geom_density(linewidth = 0.5) +
+  labs(title = "Distribution of Risk Calculator Score",
+       x = "Score",
+       y = "Density",
+       color = "") +
+  theme_minimal()
+```
+
+### Fidelity via Clustering
+We can also look at fidelity metrics that measure broad utility of the synthetic dataset. There are many metrics available but we want to consider the multivariate similarity not only univariate comparisons. Hellinger Distance is one way to meaningfully evaluate fidelity, another one is via clustering.
+
+Clustering typically relies on a distance metric that is either meant for categorical or continuous variables. We can load a customized R function that includes pre-processing and clustering, and outputs a fidelity score bounded between 0 (worst fidelity) and 1 (best fidelity).  
+```{r}
+source(paste0(path_wd, "cluster-metric.R"))
+```
+
+We can then calculate the fidelity across the 10 generated datasets. The number of clusters can be derived via the elbow method, or heuristically derived from the number of records.
+```{r}
+fidelity_bn <- lapply(synths_bn, function (synth){
+  U_cluster <- utility.cluster(train, synth, n_cluster = round(sqrt(nrow(train)/2)))
+  return(U_cluster)
+})
+
+fidelity_bn_avg <- mean(unlist(fidelity_bn), na.rm = TRUE)
+fidelity_bn_sd <- sd(unlist(fidelity_bn), na.rm = TRUE)
+```
+
+Let's compare it against the ones generated by ARF.
+```{r}
+fidelity_arf <- lapply(synths_arf, function (synth){
+  U_cluster <- utility.cluster(train, synth, n_cluster = round(sqrt(nrow(train)/2)))
+  return(U_cluster)
+})
+
+fidelity_arf_avg <- mean(unlist(fidelity_arf), na.rm = TRUE)
+fidelity_arf_sd <- sd(unlist(fidelity_arf), na.rm = TRUE)
+```
+
+```{r}
+cat("BN fidelity: AVG ", fidelity_bn_avg, " SD ", fidelity_bn_sd, "\n", "ARF fidelity: AVG ", fidelity_arf_avg, " SD ", fidelity_arf_sd)
+```
+
+### Utility via TSTR
+The utility of the synthetic data for the downstream task is, however, more relevant in practice. Our downstream task is to emulate the external (black box) risk calculator. This requires us to define the model, train it on the synthetic data and test it on the real holdout data.
+
+We can load a customized R function that includes pre-processing and modeling (via lgbm), and outputs the AUROC.    
+```{r}
+source(paste0(path_wd, "downstream-covid19.R"))
+```
+
+We can then calculate the AUROC across the 10 generated datasets. 
+```{r message=FALSE, warning=FALSE}
+tstr_bn <- lapply(synths_bn, function (synth){
+  U_tstr <- covid19.downstream(synth, holdout)
+  return(U_tstr)
+})
+
+tstr_bn_avg <- mean(unlist(tstr_bn), na.rm = TRUE)
+tstr_bn_sd <- sd(unlist(tstr_bn), na.rm = TRUE)
+```
+
+Let's compare it against the ones generated by ARF and, importantly, against the one our real dataset can achieve (i.e., TRTR).
+```{r message=FALSE, warning=FALSE}
+tstr_arf <- lapply(synths_arf, function (synth){
+  U_tstr <- covid19.downstream(synth, holdout)
+  return(U_tstr)
+})
+
+tstr_arf_avg <- mean(unlist(tstr_arf), na.rm = TRUE)
+tstr_arf_sd <- sd(unlist(tstr_arf), na.rm = TRUE)
+
+trtr <- covid19.downstream(train, holdout)
+```
+
+```{r}
+cat("BN AUROC: AVG ", tstr_bn_avg, " SD ", tstr_bn_sd, "\n", "ARF AUROC: AVG ", tstr_arf_avg, " SD ", tstr_arf_sd, "\n", "REAL AUROC: ", trtr)
+```
+
+```{r}
+auroc_combined <- data.frame(
+  AUROC = c(unlist(tstr_bn), unlist(tstr_arf)),
+  data = rep(c("BN", "ARF"), each = length(tstr_bn))
+)
+
+ggplot(auroc_combined, aes(x = data, y = AUROC, color = data)) +
+  geom_jitter(width = 0.1, size = 3, alpha = 0.7) +
+  geom_hline(yintercept = trtr, linetype = "dashed", color = "black") +
+  labs(title = "Predictive Performance of Downstream Models",
+       y = "AUROC") +
+  theme_minimal()
+```
+
+### Privacy via Membership Disclosure
+The privacy of the synthetic data needs to be evaluated in a privacy use case. We measure membership disclosure vulnerability which is one of two types that are considered relevant (the other one is attribute disclosure).
+
+Membership disclosure is measured by mimicking an attack whereby an adversary leverages the synthetic data to infer the membership status of their targets. 
+
+We can load a customized R function that models the attack, and outputs a measurement (relative F1 score) for vulnerability (the lower the better).
+```{r, warning = F, message = F}
+source(paste0(path_wd, "mmbrshp-metric.R"))
+```
+
+We have to define so called quasi-identifiers for that metric. Quasi-identifiers are the assumption for the adversary's background knowledge. These are stored in the JSON file. Remember to add one to the indices to align with R indexing standard. 
+
+```{r}
+quasi_idx <- data_covid19_info$quasi_idxs + 1
+quasi_vars <- colnames(train)[quasi_idx]
+print(quasi_vars)
+```
+
+We can then calculate the membership disclosure vulnerability across the 10 generated datasets. 
+```{r message=FALSE, warning=FALSE}
+mmbrshp_bn <- lapply(synths_bn, function(synth){
+  mmbrshp <- calc.mmbrshp(synth, train, holdout, population_size = 50000, attack_size = 300, quasi_vars)
+  return(mmbrshp)
+})
+
+mmbrshp_bn_avg <- mean(unlist(mmbrshp_bn), na.rm = TRUE)
+mmbrshp_bn_sd <- sd(unlist(mmbrshp_bn), na.rm = TRUE)
+```
+
+We do the same for the ARF synthetic datasets
+```{r message=FALSE, warning=FALSE}
+mmbrshp_arf <- lapply(synths_arf, function(synth){
+  mmbrshp <- calc.mmbrshp(synth, train, holdout, population_size = 50000, attack_size = 300, quasi_vars)
+  return(mmbrshp)
+})
+
+mmbrshp_arf_avg <- mean(unlist(mmbrshp_arf), na.rm = TRUE)
+mmbrshp_arf_sd <- sd(unlist(mmbrshp_arf), na.rm = TRUE)
+```
+
+```{r}
+cat("BN MMBRSHP: AVG ", mmbrshp_bn_avg, " SD ", mmbrshp_bn_sd, "\n", "ARF MMBRSHP: AVG ", mmbrshp_arf_avg, " SD ", mmbrshp_arf_sd)
+```
+
+```{r}
+mmbrshp_combined <- data.frame(
+  MMBRSHP = c(unlist(mmbrshp_bn), unlist(mmbrshp_arf)),
+  data = rep(c("BN", "ARF"), each = length(mmbrshp_bn))
+)
+
+ggplot(mmbrshp_combined, aes(x = data, y = MMBRSHP, color = data)) +
+  geom_jitter(width = 0.1, size = 3, alpha = 0.7) +
+  labs(title = "Membership Disclosure Vulnerability",
+       y = "Rel F1 Score") +
+  theme_minimal()
+```

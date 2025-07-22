@@ -1,0 +1,207 @@
+---
+title: "AI4PH - Breast Cancer Prediction"
+output: html_document
+---
+
+# Tutorial: Augmentation for Breast Cancer Prediction
+
+**This tutorial shows how to leverage synthetic data generation for augmentation.** 
+
+In this tutorial, we use synthetic data to augment a small dataset. This can help with downstream AI/ML prediction. In this case, we do not evaluate fidelity or privacy of the synthetic data but focus on the actual downstream task.
+
+```{r}
+path_wd <- knitr::current_input()
+
+if (is.null(path_wd) && rstudioapi::isAvailable()) {
+  path_wd <- rstudioapi::getActiveDocumentContext()$path
+  path_wd <- paste0(dirname(normalizePath(path_wd)), "/")
+}
+```
+
+## The Training Dataset
+Before generating synthetic data, we need to set aside a holdout dataset for performance evaluation. We split the raw dataset to a training and holdout dataset.
+
+### Load Your Dataset
+Let's load it as usual and have a look at it. 
+
+```{r}
+data_cancer <- read.csv(paste0(path_wd, "data_breastcancer.csv"))
+```
+
+```{r}
+head(data_cancer,5)
+```
+
+This dataset contains age and BMI of the patients as well as metabolic and inflammatory biomarkers. The variable `Class` is the breast cancer diagnosis with 1 indicating healthy controls and 2 indicating breast cancer patients.
+
+### Split Your Dataset
+Note that with such small datasets, you would typically prefer cross-validation. In this tutorial, we do a single train-test split to reduce computational burden.
+```{r}
+set.seed(1)
+train_idxs <- sample(nrow(data_cancer), size = 0.8 * nrow(data_cancer))
+train_cancer <- data_cancer[train_idxs, ]
+holdout_cancer <- data_cancer[-train_idxs, ]
+```
+
+```{r}
+write.csv(train_cancer, paste0(path_wd, "train_breastcancer.csv"), row.names = F)
+write.csv(holdout_cancer, paste0(path_wd, "holdout_breastcancer.csv"), row.names = F)
+```
+
+## Synthetic Data Generation
+SDG is conducted as in the previous tutorial: we leverage the R interface to the python package `pysdg`. The package provides a unified interface to multiple SDG models does any model-specific pre-processing for you. 
+
+### Import Functions From `pysdg`
+We import the following functions from the Python package: 
+
+* synth.load for standardized loading of datasets
+* synth.generate to generate a synthetic dataset
+
+```{r message=FALSE, warning=FALSE}
+pysdg.gen <- reticulate::import("pysdg.gen")
+```
+
+### Create a Generator Object
+You can choose between different generators. Similar to the privacy use case, we can test various generators and see which one works best.
+
+```{r}
+gen_bn <- pysdg.gen$Generator("synthcity/bayesian_network", num_cores = as.integer(4))
+gen_arf <- pysdg.gen$Generator("synthcity/arf", num_cores = as.integer(4))
+```
+
+### Load and Train the Generator Object 
+```{r}
+data_path <- paste0(path_wd, "train_breastcancer.csv")
+info_path <- paste0(path_wd, "data_breastcancer.json")
+```
+
+We train the BN generator object...
+```{r message=FALSE, warning=FALSE}
+invisible(gen_bn$load(data_path, info_path))
+gen_bn$train()
+```
+
+... and the ARF object
+```{r message=FALSE, warning=FALSE}
+invisible(gen_arf$load(data_path, info_path))
+gen_arf$train()
+```
+### Generate the Synthetic Data
+Once the SDG model is trained, you can generate as many datasets as you want and of any size you want. In this use case, we test three augmentation scenarios: 
+
+* augmentation by 46 records (i.e., 50% of its size) versus 
+* augmentation by 92 records (i.e., 100% of its size) versus
+* augmentation by 460 records (i.e., 500% of its size).
+
+As previously, we generate 2 synthetic datasets for illustration, but we would generate 10 synthetic datasets in real-world to account for the stochasticity of the process.
+
+```{r message=FALSE, warning=FALSE}
+gen_bn$gen(num_rows=nrow(gen_bn$enc_real)*5, num_synths = as.integer(2))
+synths_bn_500 <- gen_bn$unload()
+synth_bn_500 <- synths_bn_500[[1]]
+dim(synth_bn_500)
+```
+
+```{r message=FALSE, warning=FALSE}
+gen_bn$gen(num_rows=nrow(gen_bn$enc_real), num_synths = as.integer(2))
+synths_bn_100 <- gen_bn$unload()
+synth_bn_100 <- synths_bn_100[[1]]
+dim(synth_bn_100)
+```
+
+```{r message=FALSE, warning=FALSE}
+gen_bn$gen(num_rows=nrow(gen_bn$enc_real)/2, num_synths = as.integer(2))
+synths_bn_50 <- gen_bn$unload()
+synth_bn_50 <- synths_bn_50[[1]]
+dim(synth_bn_50)
+```
+
+And the same for ARF: 
+```{r message=FALSE, warning=FALSE}
+gen_arf$gen(num_rows=nrow(gen_arf$enc_real)*5, num_synths = as.integer(2))
+synths_arf_500 <- gen_arf$unload()
+synth_arf_500 <- synths_arf_500[[1]]
+dim(synth_arf_500)
+```
+
+```{r message=FALSE, warning=FALSE}
+gen_arf$gen(num_rows=nrow(gen_arf$enc_real), num_synths = as.integer(2))
+synths_arf_100 <- gen_arf$unload()
+synth_arf_100 <- synths_arf_100[[1]]
+dim(synth_arf_100)
+```
+
+```{r message=FALSE, warning=FALSE}
+gen_arf$gen(num_rows=nrow(gen_arf$enc_real)/2, num_synths = as.integer(2))
+synths_arf_50 <- gen_arf$unload()
+synth_arf_50 <- synths_arf_50[[1]]
+dim(synth_arf_50)
+```
+
+## Testing Augmentation
+We load all datasets via `pysdg` to ensure that all datatypes and missing information are treated in the same way. 
+
+For testing, we need
+
+* the training dataset
+* the holdout dataset
+* the synthetic dataset(s)
+
+We can use any of the generators to load the datasets. It serves as a "mock" generator.
+```{r}
+holdout_path <- paste0(path_wd, "holdout_breastcancer.csv")
+```
+
+```{r message=FALSE, warning=FALSE}
+gen <- pysdg.gen$Generator("synthcity/bayesian_network")
+train <- gen$load(data_path, info_path)
+holdout <- gen$load(holdout_path, info_path)
+```
+
+### LGBM Modeling
+Our task is binary classification. We therefore build an lgbm model to predict breast cancer diagnosis based on age, BMI and metabolic and inflammatory biomarkers. This model will be tested on the real holdout data.
+
+We can load a customized R function that includes pre-processing and modeling (via lgbm), and outputs the AUROC.    
+```{r}
+source(paste0(path_wd, "downstream-breastcancer.R"))
+```
+
+We first calculate AUROC for the real dataset. 
+```{r message=FALSE, warning=FALSE}
+perform_original <- breastcancer.downstream(train, holdout)
+```
+
+We can then calculate the AUROC for the augmented datasets for both scenarios (i.e., 50% versus 100% versus 500% augmentation) and average across the 2 augmented datasets per scenario. We use a customized R function that loops over the datasets, augments the real data and returns a list with the average and SD, as well as the individual measurements. This is done for BN and ARF.
+
+```{r message=FALSE, warning=FALSE}
+perform_bn_50 <- downstream.summary(synths_bn_50, train)
+perform_bn_100 <- downstream.summary(synths_bn_100, train)
+perform_bn_500 <- downstream.summary(synths_bn_500, train)
+```
+
+```{r message=FALSE, warning=FALSE}
+perform_arf_50 <- downstream.summary(synths_arf_50, train)
+perform_arf_100 <- downstream.summary(synths_arf_100, train)
+perform_arf_500 <- downstream.summary(synths_arf_500, train)
+```
+
+Let's compare the average performance.
+```{r}
+cat("REAL: ", perform_original, "BN 50%: AVG ", perform_bn_50$perform_avg, " SD ", perform_bn_50$perform_sd, "\n", "BN 100%: AVG ", perform_bn_100$perform_avg, " SD ", perform_bn_100$perform_sd, "\n", "BN 500%: AVG ", perform_bn_500$perform_avg, " SD ", perform_bn_500$perform_sd, "\n", "ARF 50%: AVG ", perform_arf_50$perform_avg, " SD ", perform_arf_50$perform_sd, "\n", "ARF 100%: AVG ", perform_arf_100$perform_avg, " SD ", perform_arf_100$perform_sd, "\n", "ARF 500%: AVG ", perform_arf_500$perform_avg, " SD ", perform_arf_500$perform_sd)
+```
+
+```{r}
+auroc_combined <- data.frame(
+  AUROC = c(unlist(perform_bn_50$perform_list), unlist(perform_bn_100$perform_list), unlist(perform_bn_500$perform_list), unlist(perform_arf_50$perform_list), unlist(perform_arf_100$perform_list), unlist(perform_arf_500$perform_list)),
+  data = rep(c("50%", "100%", "500%"), times = 2, each = length(perform_bn_50$perform_list)),
+  model = rep(c("BN", "ARF"), each = 3 * length(perform_bn_50$perform_list))
+)
+auroc_combined$data <- factor(auroc_combined$data, levels = c("50%", "100%", "500%"))
+
+ggplot(auroc_combined, aes(x = data, y = AUROC, color = model)) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.6), size = 3, alpha = 0.7) +
+  geom_hline(yintercept = perform_original, linetype = "dashed", color = "black") +
+  labs(title = "Predictive Performance of Downstream Models",
+       y = "AUROC", x = "Augmentation") +
+  theme_minimal()
+```

@@ -1,0 +1,12 @@
+{
+    "ds_name": ["data_covid19"],
+    "nct_nos":[],
+    "id_idx":[],
+    "cat_idxs":[0,1,2,3,4,5,9,10,11,12,13,14,15,16,17,18,19],
+    "cnt_idxs":[6,20],
+    "dscrt_idxs":[7,8],
+    "datetime_idxs":[],
+    "text_idxs":[],
+    "miss_vals":["nan", "<NA>","NaT","NA(b)","NA(a)","NaN","NA","None", "", "Not Reported", "Unknown"],
+    "quasi_idxs":[0,1,2,3,6,12]
+}
