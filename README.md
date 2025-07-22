@@ -8,7 +8,10 @@ Session Objectives:
 * Leveraging synthetic data for augmentation use cases
 
 ## Workshop Materials
-This repository contains the RMarkdown tutorials and exemplar datasets used during the session.
+This repository contains the RMarkdown tutorials and exemplar datasets used during the session. The two exemplar datasets are publicly available and already de-identified. The privacy use case is for demonstration purposes: 
+
+* COVID-19: available at https://www.covid19survivalcalculator.com/en/download
+* Breast Cancer: available at https://archive.ics.uci.edu/dataset/451/breast+cancer+coimbra
 
 Slides, pre-readings, and other session materials are shared with participants via the AI4PH Summer Institute event webpage. 
 
