@@ -21,4 +21,4 @@ This workshop is conducted in RStudio within a pre-configured virtual machine en
 We use a combination of R and Python libraries, including packages developed and maintained by our lab: `pysdg` and `sdgm`. For installation instructions, please refer to the respective GitHub repository or OSF documentation:
 
 * `pysdg`: https://github.com/CHEO-EHIL/pysdg-releases
-* `sdgm`: Emam, K. E. (2025, May 12). sdgm Package. https://doi.org/10.17605/OSF.IO/DCJM6
+* `sdgm`: Emam, Khaled E. 2025. “Sdgm Package.” OSF. May 12. [doi:10.17605/OSF.IO/DCJM6](https://doi.org/10.17605/OSF.IO/DCJM6)
