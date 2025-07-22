@@ -1,2 +1,21 @@
-# AI4PH_Synthetic-Data-Workshop
-Exploration of synthetic data generation and its evaluation in privacy and augmentation use cases (AI4PH Summer Institute 2025: Synthetic Data Workshop)
+# AI4PH Summer Institute 2025: Synthetic Data Workshop
+This repository contains materials for our workshop at the AI4PH Summer Institute 2025.
+
+Session Objectives:
+
+* Generating synthetic data using different generators
+* Evaluating synthetic data in terms of fidelity, downstream utility and privacy
+* Leveraging synthetic data for augmentation use cases
+
+## Workshop Materials
+This repository contains the RMarkdown tutorials and exemplar datasets used during the session.
+
+Slides, pre-readings, and other session materials are shared with participants via the AI4PH Summer Institute event webpage. 
+
+## Installation & Requirements
+This workshop is conducted in RStudio within a pre-configured virtual machine environment, which is set up by the organizers for participants ahead of the session.
+
+We use a combination of R and Python libraries, including packages developed and maintained by our lab: `pysdg` and `sdgm`. For installation instructions, please refer to the respective GitHub repository or OSF documentation:
+
+* `pysdg`: https://github.com/CHEO-EHIL/pysdg-releases
+* `sdgm`: Emam, K. E. (2025, May 12). sdgm Package. https://doi.org/10.17605/OSF.IO/DCJM6
